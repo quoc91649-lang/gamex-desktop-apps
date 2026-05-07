@@ -1,0 +1,137 @@
+name: Build Desktop App - kjakjdhasd
+
+on:
+  push:
+    paths:
+      - 'apps/kjakjdhasd-1778143526405/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            ext: .exe
+            shell: pwsh
+          - os: macos-latest
+            platform: macos
+            ext: ""
+            shell: bash
+          - os: ubuntu-latest
+            platform: linux
+            ext: ""
+            shell: bash
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        working-directory: apps/kjakjdhasd-1778143526405
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        shell: bash
+
+      - name: Install dependencies (Windows)
+        if: matrix.platform == 'windows'
+        working-directory: apps/kjakjdhasd-1778143526405
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          if (Test-Path "requirements.txt") { pip install -r requirements.txt }
+        shell: pwsh
+
+      - name: Build executable (Linux)
+        if: matrix.platform == 'linux'
+        working-directory: apps/kjakjdhasd-1778143526405
+        run: pyinstaller --onefile --windowed --add-data ".:." --name "kjakjdhasd" main.py
+        shell: bash
+
+      - name: Build executable (Windows)
+        if: matrix.platform == 'windows'
+        working-directory: apps/kjakjdhasd-1778143526405
+        run: pyinstaller --onefile --windowed --add-data ".;." --name "kjakjdhasd" main.py
+        shell: pwsh
+
+      - name: Build executable (macOS)
+        if: matrix.platform == 'macos'
+        working-directory: apps/kjakjdhasd-1778143526405
+        run: |
+          pyinstaller --onefile --windowed --add-data ".:." --name "kjakjdhasd" main.py
+          cd dist
+          zip -r "kjakjdhasd-macos.zip" "kjakjdhasd.app" || zip -r "kjakjdhasd-macos.zip" "kjakjdhasd"
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kjakjdhasd-${{ matrix.platform }}
+          path: |
+            apps/kjakjdhasd-1778143526405/dist/kjakjdhasd.exe
+            apps/kjakjdhasd-1778143526405/dist/kjakjdhasd-macos.zip
+            apps/kjakjdhasd-1778143526405/dist/kjakjdhasd
+          if-no-files-found: warn
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get version
+        id: version
+        run: echo "version=1.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: List artifacts
+        run: find dist/ -type f | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "kjakjdhasd-v${{ steps.version.outputs.version }}"
+          name: "kjakjdhasd v${{ steps.version.outputs.version }}"
+          files: dist/**/*
+          body: |
+            ## kjakjdhasd
+            Auto-built from source by GameX platform.
+
+            ### Tải về theo hệ điều hành
+            | OS | File |
+            |---|---|
+            | 🪟 Windows | `kjakjdhasd.exe` |
+            | 🍎 macOS | `kjakjdhasd-macos.zip` |
+            | 🐧 Linux | `kjakjdhasd` (Linux binary) |
+
+            ### Cài đặt trên macOS
+            1. Tải file `kjakjdhasd-macos.zip` về và giải nén.
+            2. Mở ứng dụng **Terminal** (nhấn Cmd + Space gõ Terminal).
+            3. Gõ lệnh: `xattr -cr ` (lưu ý có dấu cách ở cuối).
+            4. Kéo thả file `kjakjdhasd.app` vừa giải nén vào cửa sổ Terminal rồi nhấn Enter (việc này để xóa cảnh báo bảo mật ứng dụng tải từ internet).
+            5. Click đúp vào `kjakjdhasd.app` để chơi bình thường.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update build status
+        if: always()
+        run: |
+          STATUS="${{ job.status }}"
+          if [ "$STATUS" = "success" ]; then RESULT="success"; else RESULT="failed"; fi
+          WEBHOOK="${{ vars.GAMEX_WEBHOOK_URL }}"
+          curl -s -X POST "$WEBHOOK/api/desktop-build-webhook" \
+            -H "Content-Type: application/json" \
+            -d "{\"app_id\":\"apps/kjakjdhasd-1778143526405\",\"status\":\"$RESULT\",\"run_id\":\"${{ github.run_id }}\",\"tag\":\"kjakjdhasd-v${{ steps.version.outputs.version }}\"}" || true
