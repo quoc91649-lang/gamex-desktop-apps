@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+dist/
+build/
+*.spec
+.env
+venv/
+.venv/
+env/
+
+# PyInstaller output
+*.manifest
+
+# IDE
+.vscode/
+.idea/
