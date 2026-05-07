@@ -1,0 +1,137 @@
+name: Build Desktop App - TEST
+
+on:
+  push:
+    paths:
+      - 'apps/test-1778149477713/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            ext: .exe
+            shell: pwsh
+          - os: macos-latest
+            platform: macos
+            ext: ""
+            shell: bash
+          - os: ubuntu-latest
+            platform: linux
+            ext: ""
+            shell: bash
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        working-directory: apps/test-1778149477713
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        shell: bash
+
+      - name: Install dependencies (Windows)
+        if: matrix.platform == 'windows'
+        working-directory: apps/test-1778149477713
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          if (Test-Path "requirements.txt") { pip install -r requirements.txt }
+        shell: pwsh
+
+      - name: Build executable (Linux)
+        if: matrix.platform == 'linux'
+        working-directory: apps/test-1778149477713
+        run: pyinstaller --onefile  --paths "." --add-data ".:." --name "test" main.py
+        shell: bash
+
+      - name: Build executable (Windows)
+        if: matrix.platform == 'windows'
+        working-directory: apps/test-1778149477713
+        run: pyinstaller --onefile  --paths "." --add-data ".;." --name "test" main.py
+        shell: pwsh
+
+      - name: Build executable (macOS)
+        if: matrix.platform == 'macos'
+        working-directory: apps/test-1778149477713
+        run: |
+          pyinstaller --onefile  --paths "." --add-data ".:." --name "test" main.py
+          cd dist
+          zip -r "test-macos.zip" "test.app" || zip -r "test-macos.zip" "test"
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-${{ matrix.platform }}
+          path: |
+            apps/test-1778149477713/dist/test.exe
+            apps/test-1778149477713/dist/test-macos.zip
+            apps/test-1778149477713/dist/test
+          if-no-files-found: warn
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get version
+        id: version
+        run: echo "version=1.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: List artifacts
+        run: find dist/ -type f | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "test-v${{ steps.version.outputs.version }}"
+          name: "TEST v${{ steps.version.outputs.version }}"
+          files: dist/**/*
+          body: |
+            ## TEST
+            Auto-built from source by GameX platform.
+
+            ### Tải về theo hệ điều hành
+            | OS | File |
+            |---|---|
+            | 🪟 Windows | `test.exe` |
+            | 🍎 macOS | `test-macos.zip` |
+            | 🐧 Linux | `test` (Linux binary) |
+
+            ### Cài đặt trên macOS
+            1. Tải file `test-macos.zip` về và giải nén.
+            2. Mở ứng dụng **Terminal** (nhấn Cmd + Space gõ Terminal).
+            3. Gõ lệnh: `xattr -cr ` (lưu ý có dấu cách ở cuối).
+            4. Kéo thả file `test.app` vừa giải nén vào cửa sổ Terminal rồi nhấn Enter (việc này để xóa cảnh báo bảo mật ứng dụng tải từ internet).
+            5. Click đúp vào `test.app` để chơi bình thường.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update build status
+        if: always()
+        run: |
+          STATUS="${{ job.status }}"
+          if [ "$STATUS" = "success" ]; then RESULT="success"; else RESULT="failed"; fi
+          WEBHOOK="${{ vars.GAMEX_WEBHOOK_URL }}"
+          curl -s -X POST "$WEBHOOK/api/desktop-build-webhook" \
+            -H "Content-Type: application/json" \
+            -d "{\"app_id\":\"apps/test-1778149477713\",\"status\":\"$RESULT\",\"run_id\":\"${{ github.run_id }}\",\"tag\":\"test-v${{ steps.version.outputs.version }}\"}" || true
