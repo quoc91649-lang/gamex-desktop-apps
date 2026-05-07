@@ -36,7 +36,9 @@ jobs:
 
       - name: Get version
         id: version
-        run: echo "version=1.0.${{ github.run_number }}" >> ${{ env.GITHUB_OUTPUT }}
+        run: |
+          $runNumber = "${{ github.run_number }}"
+          "version=1.0.$runNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
         shell: pwsh
 
       - name: Create GitHub Release
@@ -48,17 +50,15 @@ jobs:
           body: |
             ## anh ten la bang
             Auto-built from source by GameX platform.
-            ### Cài đặt
-            1. Tải file .exe về
-            2. Double-click để chạy
-            3. Nếu Windows SmartScreen cảnh báo, chọn "More info" → "Run anyway"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update build status
         if: always()
         run: |
-          $status = if ("${{ job.status }}" -eq "success") { "success" } else { "failed" }
-          $body = @{ app_id = "apps/anh-ten-la-bang-1778127282007"; status = $status; run_id = "${{ github.run_id }}"; tag = "anh-ten-la-bang-v${{ steps.version.outputs.version }}" } | ConvertTo-Json
-          try { Invoke-RestMethod -Uri "${{ vars.GAMEX_WEBHOOK_URL }}/api/desktop-build-webhook" -Method POST -Body $body -ContentType "application/json" } catch { Write-Host "Webhook failed: $_" }
+          $jobStatus = "${{ job.status }}"
+          $status = if ($jobStatus -eq "success") { "success" } else { "failed" }
+          $body = @{ app_id = "apps/anh-ten-la-bang-1778127282007"; status = $status; run_id = "${{ github.run_id }}" } | ConvertTo-Json
+          $webhookUrl = "${{ vars.GAMEX_WEBHOOK_URL }}"
+          try { Invoke-RestMethod -Uri "$webhookUrl/api/desktop-build-webhook" -Method POST -Body $body -ContentType "application/json" } catch { Write-Host "Webhook failed: $_" }
         shell: pwsh
